@@ -1,0 +1,82 @@
+==================== msr_imm.xml 1/1 System
+
+          if op1 == '000' && op2 == '000' then SEE "CFINV";
+if op1 == '000' && op2 == '001' then SEE "XAFLAG";
+if op1 == '000' && op2 == '010' then SEE "AXFLAG";
+
+AArch64.CheckSystemAccess('00', op1, '0100', CRm, op2, '11111', '0');
+bits(2) min_EL;
+boolean need_secure = FALSE;
+
+case op1 of
+    when '00x'
+        min_EL = EL1;
+    when '010'
+        min_EL = EL1;
+    when '011'
+        min_EL = EL0;
+    when '100'
+        min_EL = EL2;
+    when '101'
+        if !HaveVirtHostExt() then
+            UNDEFINED;
+        min_EL = EL2;
+    when '110'
+        min_EL = EL3;
+    when '111'
+        min_EL = EL1;
+        need_secure = TRUE;
+
+if (UInt(PSTATE.EL) < UInt(min_EL) ||
+    (need_secure && CurrentSecurityState() != SS_Secure)) then
+    UNDEFINED;
+
+bits(4) operand = CRm;
+PSTATEField field;
+case op1:op2 of
+    when '000 011'
+        if !HaveUAOExt() then UNDEFINED;
+        field = PSTATEField_UAO;
+    when '000 100'
+        if !HavePANExt() then UNDEFINED;
+        field = PSTATEField_PAN;
+    when '000 101' field = PSTATEField_SP;
+    when '001 000'
+        if !HaveFeatNMI() then UNDEFINED;
+        if CRm<3:1> != '000' then UNDEFINED;
+        field = PSTATEField_ALLINT;
+    when '011 010'
+        if !HaveDITExt() then UNDEFINED;
+        field = PSTATEField_DIT;
+    when '011 011'
+        case CRm of
+            when '001x'
+                if !HaveSME() then UNDEFINED;
+                field = PSTATEField_SVCRSM;
+            when '010x'
+                if !HaveSME() then UNDEFINED;
+                field = PSTATEField_SVCRZA;
+            when '011x'
+                if !HaveSME() then UNDEFINED;
+                field = PSTATEField_SVCRSMZA;
+            otherwise
+                UNDEFINED;
+    when '011 100'
+        if !HaveMTEExt() then UNDEFINED;
+        field = PSTATEField_TCO;
+    when '011 110' field = PSTATEField_DAIFSet;
+    when '011 111' field = PSTATEField_DAIFClr;
+    when '011 001'
+        if !HaveSSBSExt() then UNDEFINED;
+        field = PSTATEField_SSBS;
+    otherwise      UNDEFINED;
+
+// Check that an AArch64 MSR/MRS access to the DAIF flags is permitted
+if PSTATE.EL == EL0 && field IN {PSTATEField_DAIFSet, PSTATEField_DAIFClr}  then
+    if !ELUsingAArch32(EL1) && ((EL2Enabled() && HCR_EL2.<E2H,TGE> == '11') || SCTLR_EL1.UMA == '0') then
+        if EL2Enabled() && !ELUsingAArch32(EL2) && HCR_EL2.TGE == '1' then
+            AArch64.SystemAccessTrap(EL2, 0x18);
+        else
+            AArch64.SystemAccessTrap(EL1, 0x18);
+        
+====================
